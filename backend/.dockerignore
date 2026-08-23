@@ -1,0 +1,53 @@
+# .dockerignore — keep the Docker build context clean and secure
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Secrets and local config — never bake into the image
+.env.*
+*.env
+secrets/
+
+# Dev / test files — not needed at runtime
+test_*.py
+*_test.py
+requirements-dev.txt
+pytest.ini
+pyproject.toml
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Notebooks and training artefacts — keep image minimal
+*.ipynb
+*.ipynb_checkpoints/
+outputs/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+[project]
+name = "Crednco-Admin"
+version = "0.1.0"
+description = "Crednco Admin — dashboard for reviewing and approving loan search/application records"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = ["backend"]
+
+[tool.pyright]
+include = ["backend"]
+venvPath = "backend"
+venv = ".venv"

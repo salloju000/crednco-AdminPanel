@@ -1,0 +1,22 @@
+# Backend dependencies for Crednco Admin API
+# Python 3.12+
+#
+# Install:  pip install -r requirements.txt
+# Run:      uvicorn main:app --reload --port 8001
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.129.0,<1.0.0
+uvicorn[standard]>=0.40.0,<1.0.0
+pydantic>=2.12.0,<3.0.0
+slowapi>=0.1.9,<1.0.0
+
+# ── Firebase (Firestore access) ───────────────────────────────────────────────
+firebase-admin>=6.5.0,<7.0.0
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0,<2.0.0   # Load .env variables for local development
+
+# ── Admin Security ────────────────────────────────────────────────────────────
+pyotp>=2.9.0,<3.0.0
+qrcode[pil]>=7.4.0,<8.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0

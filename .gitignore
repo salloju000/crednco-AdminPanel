@@ -1,0 +1,58 @@
+# Logic / Dependencies
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tech-specific
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production
+.env.production.local
+
+# Build outputs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.agent/
+.gemini/
+
+# Python
+venv/
+.venv/
+env/
+.env
+__pycache__/
+*.py[cod]
+
+# Backend specific
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/.pytest_cache/
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.env
+backend/.env.*
+backend/*.json
+
+# Local test files
+test_response.json
+
+# ML Model (Large files)
+backend/*.pkl
+backend/*.joblib

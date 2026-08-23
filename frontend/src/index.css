@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 25% 97%;        /* soft porcelain */
+  --foreground: 220 30% 18%;        
+  --muted: 210 18% 94%;             
+
+  /* ── Luxury Parchment Palette ───────── */
+  --gold: 38 55% 51%;               /* #c89b3c - Signature CREDNCO Gold */
+  --gold-dim: 38 55% 51% / 0.7;
+  --gold-light: 38 55% 51% / 0.15;
+  --gold-border: 38 55% 51% / 0.35;
+  --gold-focus: 38 55% 51% / 0.5;
+
+  --ink: 40 30% 10%;                /* #2a1f0a - Deep warm brown */
+  --ink-mid: 40 30% 10% / 0.6;
+  --ink-mute: 40 30% 10% / 0.38;
+
+  --parchment: 36 30% 96%;          
+  --cream: 45 40% 99%;              
+
+  /* ── Surface Layers ───────────────────────── */
+  --card: 45 40% 99%;
+  --card-foreground: 40 30% 10%;
+  --popover: 45 40% 99%;
+  --popover-foreground: 40 30% 10%;
+  --secondary: 40 20% 92%;
+  --secondary-foreground: 40 25% 25%;
+
+  /* ── Prediction Status / Feedback ────────── */
+  --success: 142 70% 29%;           
+  --success-bg: 142 70% 29% / 0.07;
+  --success-border: 142 70% 29% / 0.22;
+
+  --warning: 31 85% 37%;            
+  --warning-bg: 31 85% 37% / 0.07;
+  --warning-border: 31 85% 37% / 0.22;
+
+  --destructive: 0 72% 42%;         
+  --destructive-bg: 0 72% 42% / 0.07;
+  --destructive-border: 0 72% 42% / 0.22;
+
+  /* ── Borders / Elevation ──────────────────── */
+  --border: 38 30% 50% / 0.25;      
+  --input: 38 30% 92%;
+  --ring: 38 55% 51%;
+
+  --shadow-luxury: 0 4px 40px rgba(160, 120, 40, 0.10);
+  --radius: 1rem;
+
+  --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+}
+
+.dark {
+  --background: 222 47% 11%;        /* Navy Dark */
+  --foreground: 210 40% 98%;
+  --muted: 217 33% 17%;
+
+  --card: 222 47% 11%;
+  --card-foreground: 210 40% 98%;
+
+  --ink: 210 40% 98%;
+  --ink-mid: 210 40% 98% / 0.7;
+  --ink-mute: 210 40% 98% / 0.4;
+
+  --border: 217 33% 32%;
+  --input: 210 40% 98% / 0.1;
+  --secondary: 217 33% 17%;
+
+  --shadow-luxury: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom Scrollbar for Luxury Feel */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gold/20 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gold/40;
+}

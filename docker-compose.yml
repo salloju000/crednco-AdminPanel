@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:8081,http://localhost,http://127.0.0.1:8081
+      - LOG_LEVEL=INFO
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    restart: always

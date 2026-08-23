@@ -1,0 +1,10 @@
+{
+  "source_directories": ["."],
+  "search_path": [
+    {
+      "site-package": ".venv/Lib/site-packages"
+    }
+  ],
+  "site_package_search_strategy": "all",
+  "strict": false
+}
