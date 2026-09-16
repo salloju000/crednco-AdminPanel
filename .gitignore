@@ -56,3 +56,8 @@ test_response.json
 # ML Model (Large files)
 backend/*.pkl
 backend/*.joblib
+
+# Keep the env templates tracked (they hold placeholders, not secrets)
+!.env.example
+!backend/.env.example
+!frontend/.env.example
