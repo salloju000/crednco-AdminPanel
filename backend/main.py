@@ -73,9 +73,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://localhost:5175",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
     "http://127.0.0.1:3000",
     "https://credncoadminpanel.vercel.app",
 ]
@@ -335,10 +337,13 @@ async def health():
 @limiter.limit("30/minute")
 async def get_admin_searches(request: Request, admin_user_id: str = Depends(require_admin_user)):
     """
-    Retrieve recent search records from Firestore.
+    Retrieve all search records from Firestore, newest first.
     Protected by Admin Auth JWT header.
+
+    Unlimited on purpose: the admin dashboard derives its totals and charts
+    client-side from this list, so a cap silently under-counts them.
     """
-    return fetch_recent_searches(limit=100)
+    return fetch_recent_searches()
 
 @app.get(
     "/admin/applications",
@@ -347,7 +352,8 @@ async def get_admin_searches(request: Request, admin_user_id: str = Depends(requ
 )
 @limiter.limit("30/minute")
 async def get_admin_applications(request: Request, admin_user_id: str = Depends(require_admin_user)):
-    return fetch_recent_applications(limit=100)
+    # Unlimited for the same reason as /admin/searches.
+    return fetch_recent_applications()
 
 @app.get(
     "/admin/user-stats",

@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react';
-import type { SearchRecord } from '../hooks/types';
+import { getStatus, type SearchRecord } from '../hooks/types';
+import { formatLoanType } from '../hooks/formatLoanType';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -23,17 +24,65 @@ const RED = '#ef4444';
 const AMBER = '#f59e0b';
 const SLATE = 'rgba(100, 116, 139, 0.5)';
 
-const PIE_COLORS = [GREEN, RED, AMBER];
+const RISK_BUCKETS = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'];
+const RISK_COLORS = [RED, '#f97316', AMBER, '#84cc16', GREEN];
 
 /* ── Helpers ──────────────────────────────────────────────────── */
-function getMonthKey(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function toValidDate(record: SearchRecord): Date | null {
+  if (!record.timestamp) return null;
+  const d = new Date(record.timestamp);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function getDayKey(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Per-day (range ≤ 60 days) or per-month buckets in local time, continuous from
+ * the first to the last record so empty periods plot as 0 instead of being
+ * skipped. Buckets are keyed by a sortable YYYY-MM[-DD] string and created in
+ * chronological order, so no label parsing is needed to sort them.
+ */
+function buildTimeline(applications: SearchRecord[], searches: SearchRecord[]) {
+  const appDates = applications.map(toValidDate).filter((d): d is Date => d !== null);
+  const checkDates = searches.map(toValidDate).filter((d): d is Date => d !== null);
+  const all = [...appDates, ...checkDates];
+  if (!all.length) return [];
+
+  let minTs = Infinity;
+  let maxTs = -Infinity;
+  for (const d of all) {
+    minTs = Math.min(minTs, d.getTime());
+    maxTs = Math.max(maxTs, d.getTime());
+  }
+  const useDays = (maxTs - minTs) / DAY_MS <= 60;
+
+  const keyOf = (d: Date) =>
+    useDays
+      ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+      : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  const labelOf = (d: Date) =>
+    useDays
+      ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : `${d.toLocaleDateString('en-US', { month: 'short' })} '${String(d.getFullYear()).slice(-2)}`;
+
+  const first = new Date(minTs);
+  const end = new Date(maxTs);
+  const cursor = useDays
+    ? new Date(first.getFullYear(), first.getMonth(), first.getDate())
+    : new Date(first.getFullYear(), first.getMonth(), 1);
+
+  const buckets = new Map<string, { name: string; applications: number; checks: number }>();
+  while (cursor <= end) {
+    buckets.set(keyOf(cursor), { name: labelOf(cursor), applications: 0, checks: 0 });
+    if (useDays) cursor.setDate(cursor.getDate() + 1);
+    else cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  appDates.forEach((d) => { buckets.get(keyOf(d))!.applications++; });
+  checkDates.forEach((d) => { buckets.get(keyOf(d))!.checks++; });
+  return Array.from(buckets.values());
 }
 
 /* ── Custom Tooltip ───────────────────────────────────────────── */
@@ -76,6 +125,34 @@ function ChartCard({
   );
 }
 
+/* ── Empty / error placeholder for application-based charts ───── */
+function ChartEmpty({ error }: { error?: string | null }) {
+  return (
+    <div className="h-[220px] flex flex-col items-center justify-center text-center gap-1 px-4">
+      <p className={`text-sm font-bold ${error ? 'text-red-500' : 'text-ink'}`}>
+        {error ? "Couldn't load applications" : 'No applications yet'}
+      </p>
+      <p className="text-xs text-ink-mute max-w-xs">
+        {error ?? 'This chart fills in once loan applications are submitted.'}
+      </p>
+    </div>
+  );
+}
+
+/* ── Series legend ────────────────────────────────────────────── */
+function SeriesLegend({ items }: { items: { name: string; color: string }[] }) {
+  return (
+    <div className="flex items-center justify-center gap-5 mt-3 text-xs">
+      {items.map((item) => (
+        <div key={item.name} className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+          <span className="text-ink-mute font-medium">{item.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ── Custom Legend for Pie ─────────────────────────────────────── */
 function PieLegend({ data }: { data: { name: string; value: number; color: string }[] }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
@@ -105,79 +182,35 @@ interface Props {
   applications: SearchRecord[];
   searches: SearchRecord[];
   loading: boolean;
+  /** Applications fetch error — shown in place of the application-based charts. */
+  error?: string | null;
 }
 
-export const DashboardCharts = memo(function DashboardCharts({ applications, searches, loading }: Props) {
+export const DashboardCharts = memo(function DashboardCharts({ applications, searches, loading, error }: Props) {
   /* ── 1) Applications Over Time ─────────────────────────────── */
-  const timelineData = useMemo(() => {
-    const allRecords = [...applications, ...searches];
-    if (!allRecords.length) return [];
-
-    const buckets = new Map<string, { applications: number; checks: number }>();
-
-    // Determine if we should use days or months
-    const timestamps = allRecords
-      .filter((r) => r.timestamp)
-      .map((r) => new Date(r.timestamp!).getTime());
-
-    if (!timestamps.length) return [];
-
-    const minTs = Math.min(...timestamps);
-    const maxTs = Math.max(...timestamps);
-    const rangeInDays = (maxTs - minTs) / (1000 * 60 * 60 * 24);
-    const useDays = rangeInDays <= 60;
-
-    const keyFn = useDays ? getDayKey : getMonthKey;
-
-    applications.forEach((r) => {
-      if (!r.timestamp) return;
-      const key = keyFn(r.timestamp);
-      const b = buckets.get(key) || { applications: 0, checks: 0 };
-      b.applications++;
-      buckets.set(key, b);
-    });
-
-    searches.forEach((r) => {
-      if (!r.timestamp) return;
-      const key = keyFn(r.timestamp);
-      const b = buckets.get(key) || { applications: 0, checks: 0 };
-      b.checks++;
-      buckets.set(key, b);
-    });
-
-    // Sort chronologically
-    return Array.from(buckets.entries())
-      .sort((a, b) => {
-        const da = new Date(a[0]);
-        const db = new Date(b[0]);
-        return da.getTime() - db.getTime();
-      })
-      .map(([name, data]) => ({ name, ...data }));
-  }, [applications, searches]);
+  const timelineData = useMemo(() => buildTimeline(applications, searches), [applications, searches]);
 
   /* ── 2) Approval Breakdown ─────────────────────────────────── */
   const approvalData = useMemo(() => {
-    let approved = 0, rejected = 0, pending = 0;
+    const counts = { approved: 0, rejected: 0, pending: 0 };
     applications.forEach((r) => {
-      const a = r.metadata?.prediction?.approved;
-      if (a === true) approved++;
-      else if (a === false) rejected++;
-      else pending++;
+      counts[getStatus(r.metadata?.prediction?.approved)]++;
     });
     return [
-      { name: 'Approved', value: approved, color: GREEN },
-      { name: 'Rejected', value: rejected, color: RED },
-      { name: 'Pending', value: pending, color: AMBER },
+      { name: 'Approved', value: counts.approved, color: GREEN },
+      { name: 'Rejected', value: counts.rejected, color: RED },
+      { name: 'Pending', value: counts.pending, color: AMBER },
     ];
   }, [applications]);
+
+  // Zero-value slices still receive paddingAngle and leave a stray gap in the ring.
+  const pieSlices = approvalData.filter((d) => d.value > 0);
 
   /* ── 3) Loan Type Distribution ─────────────────────────────── */
   const loanTypeData = useMemo(() => {
     const counts = new Map<string, number>();
     applications.forEach((r) => {
-      const loanType = String(r.data?.loan_type ?? 'Unknown')
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (c) => c.toUpperCase());
+      const loanType = formatLoanType(r.data?.loan_type);
       counts.set(loanType, (counts.get(loanType) || 0) + 1);
     });
     return Array.from(counts.entries())
@@ -188,22 +221,19 @@ export const DashboardCharts = memo(function DashboardCharts({ applications, sea
 
   /* ── 4) Risk Score Distribution ────────────────────────────── */
   const riskData = useMemo(() => {
-    const buckets = [
-      { range: '0-20%', min: 0, max: 20, count: 0 },
-      { range: '20-40%', min: 20, max: 40, count: 0 },
-      { range: '40-60%', min: 40, max: 60, count: 0 },
-      { range: '60-80%', min: 60, max: 80, count: 0 },
-      { range: '80-100%', min: 80, max: 100, count: 0 },
-    ];
+    const counts = RISK_BUCKETS.map(() => 0);
     applications.forEach((r) => {
-      const prob = r.metadata?.prediction?.approval_probability;
-      if (prob == null) return;
-      const bucket = buckets.find((b) => prob >= b.min && prob < b.max) ?? buckets[buckets.length - 1];
-      if (prob === 100) buckets[buckets.length - 1].count++;
-      else bucket.count++;
+      const raw = r.metadata?.prediction?.approval_probability;
+      if (raw == null) return;
+      const prob = Number(raw);
+      if (!Number.isFinite(prob)) return;
+      // 0-100 scale; 100 belongs to the top bucket, out-of-range values are clamped.
+      counts[Math.min(RISK_BUCKETS.length - 1, Math.max(0, Math.floor(prob / 20)))]++;
     });
-    return buckets.map((b) => ({ name: b.range, count: b.count }));
+    return RISK_BUCKETS.map((name, i) => ({ name, count: counts[i] }));
   }, [applications]);
+
+  const hasApplications = applications.length > 0;
 
   if (loading) {
     return (
@@ -226,8 +256,8 @@ export const DashboardCharts = memo(function DashboardCharts({ applications, sea
         <div className="w-14 h-14 rounded-2xl bg-gold/10 flex items-center justify-center text-gold mx-auto mb-4">
           <TrendingUp size={28} />
         </div>
-        <p className="font-bold text-ink text-base">No data to visualize</p>
-        <p className="text-sm text-ink-mute mt-1">Charts will appear once application data is available.</p>
+        <p className="font-bold text-ink text-base">{error ? "Couldn't load chart data" : 'No data to visualize'}</p>
+        <p className="text-sm text-ink-mute mt-1">{error ?? 'Charts will appear once application data is available.'}</p>
       </div>
     );
   }
@@ -248,7 +278,7 @@ export const DashboardCharts = memo(function DashboardCharts({ applications, sea
                 <stop offset="95%" stopColor={SLATE} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
             <XAxis
               dataKey="name"
               tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
@@ -284,95 +314,107 @@ export const DashboardCharts = memo(function DashboardCharts({ applications, sea
             />
           </AreaChart>
         </ResponsiveContainer>
+        <SeriesLegend items={[{ name: 'Applications', color: GOLD }, { name: 'Eligibility Checks', color: SLATE }]} />
       </ChartCard>
 
       {/* ── Pie Chart: Approval Breakdown ────────────────────── */}
       <ChartCard title="Approval Breakdown" icon={PieIcon}>
-        <div className="flex items-center gap-4">
-          <ResponsiveContainer width="55%" height={200}>
-            <PieChart>
-              <Pie
-                data={approvalData}
-                cx="50%"
-                cy="50%"
-                innerRadius={55}
-                outerRadius={80}
-                paddingAngle={4}
-                dataKey="value"
-                stroke="none"
-              >
-                {approvalData.map((_, index) => (
-                  <Cell key={index} fill={PIE_COLORS[index]} />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="flex-1">
-            <PieLegend data={approvalData} />
+        {hasApplications ? (
+          <div className="flex items-center gap-4">
+            <ResponsiveContainer width="55%" height={200}>
+              <PieChart>
+                <Pie
+                  data={pieSlices}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={80}
+                  paddingAngle={pieSlices.length > 1 ? 4 : 0}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {pieSlices.map((slice) => (
+                    <Cell key={slice.name} fill={slice.color} />
+                  ))}
+                </Pie>
+                <Tooltip content={<ChartTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="flex-1">
+              <PieLegend data={approvalData} />
+            </div>
           </div>
-        </div>
+        ) : (
+          <ChartEmpty error={error} />
+        )}
       </ChartCard>
 
       {/* ── Bar Chart: Loan Type Distribution ────────────────── */}
       <ChartCard title="Loan Type Distribution" icon={Layers}>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={loanTypeData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="name"
-              tick={{ fontSize: 9, fill: 'hsl(var(--ink-mute))' }}
-              axisLine={false}
-              tickLine={false}
-              interval={0}
-              angle={-25}
-              textAnchor="end"
-              height={50}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
-              axisLine={false}
-              tickLine={false}
-              allowDecimals={false}
-            />
-            <Tooltip content={<ChartTooltip />} />
-            <Bar
-              dataKey="count"
-              name="Applications"
-              fill={GOLD}
-              radius={[8, 8, 0, 0]}
-              maxBarSize={40}
-            />
-          </BarChart>
-        </ResponsiveContainer>
+        {hasApplications ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={loanTypeData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 9, fill: 'hsl(var(--ink-mute))' }}
+                axisLine={false}
+                tickLine={false}
+                interval={0}
+                angle={-25}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Bar
+                dataKey="count"
+                name="Applications"
+                fill={GOLD}
+                radius={[8, 8, 0, 0]}
+                maxBarSize={40}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <ChartEmpty error={error} />
+        )}
       </ChartCard>
 
       {/* ── Bar Chart: Risk Score Distribution ───────────────── */}
       <ChartCard title="Risk Score Distribution" icon={Activity}>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={riskData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="name"
-              tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
-              axisLine={false}
-              tickLine={false}
-              allowDecimals={false}
-            />
-            <Tooltip content={<ChartTooltip />} />
-            <Bar dataKey="count" name="Applications" radius={[8, 8, 0, 0]} maxBarSize={50}>
-              {riskData.map((_, index) => {
-                const colors = [RED, '#f97316', AMBER, '#84cc16', GREEN];
-                return <Cell key={index} fill={colors[index]} />;
-              })}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        {hasApplications ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={riskData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: 'hsl(var(--ink-mute))' }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Bar dataKey="count" name="Applications" radius={[8, 8, 0, 0]} maxBarSize={50}>
+                {riskData.map((bucket, index) => (
+                  <Cell key={bucket.name} fill={RISK_COLORS[index]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <ChartEmpty error={error} />
+        )}
       </ChartCard>
     </div>
   );

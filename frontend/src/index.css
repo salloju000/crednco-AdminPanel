@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 :root {
+  /* Native controls (select popups, scrollbars, date pickers) follow this. */
+  color-scheme: light;
+
   --background: 210 25% 97%;        /* soft porcelain */
   --foreground: 220 30% 18%;        
   --muted: 210 18% 94%;             
@@ -43,7 +46,9 @@
   --destructive-border: 0 72% 42% / 0.22;
 
   /* ── Borders / Elevation ──────────────────── */
-  --border: 38 30% 50% / 0.25;      
+  /* Opaque (≈ 38 30% 50% at 25% over cream): Tailwind appends its own alpha
+     for border-border/NN, so an alpha inside the token makes those invalid. */
+  --border: 38 32% 87%;
   --input: 38 30% 92%;
   --ring: 38 55% 51%;
 
@@ -55,6 +60,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+
   --background: 222 47% 11%;        /* Navy Dark */
   --foreground: 210 40% 98%;
   --muted: 217 33% 17%;

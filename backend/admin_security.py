@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 from fastapi import APIRouter, HTTPException, Depends, Request, status
@@ -45,6 +46,23 @@ def _require_secret(env_var: str, dev_fallback: str) -> str:
 JWT_SECRET = _require_secret("JWT_SECRET", "dev-only-insecure-jwt-secret")
 ALGORITHM = "HS256"
 ADMIN_API_KEY = _require_secret("ADMIN_API_KEY", "dev-only-insecure-admin-api-key")
+
+# ── Default local login ───────────────────────────────────────────────────────
+# admin/admin123 skips TOTP and Firestore so the panel can be used locally
+# without Firebase. It requires ALLOW_DEFAULT_ADMIN=true and ENV=development;
+# in any other environment the flag is ignored.
+DEFAULT_ADMIN_USER = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin123"
+_DEFAULT_ADMIN_ENABLED: bool = (
+    _IS_DEVELOPMENT and os.getenv("ALLOW_DEFAULT_ADMIN", "false").lower().strip() == "true"
+)
+if _DEFAULT_ADMIN_ENABLED:
+    logger.warning(
+        "ALLOW_DEFAULT_ADMIN is enabled — %s/%s login is accepted (development only).",
+        DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASSWORD,
+    )
+elif os.getenv("ALLOW_DEFAULT_ADMIN", "false").lower().strip() == "true":
+    logger.warning("ALLOW_DEFAULT_ADMIN is ignored outside ENV=development.")
 
 # -----------------------
 # Models
@@ -112,14 +130,21 @@ def create_user(data: CreateUser):
 @router.post("/login")
 @limiter.limit("5/minute")
 def login(request: Request, data: LoginRequest):
-    secret = get_user_secret(data.user_id)
-    if not secret:
-        raise HTTPException(status_code=400, detail="User not found")
+    is_default_admin = (
+        _DEFAULT_ADMIN_ENABLED
+        and data.user_id == DEFAULT_ADMIN_USER
+        and hmac.compare_digest(data.password, DEFAULT_ADMIN_PASSWORD)
+    )
 
-    totp = pyotp.TOTP(secret)
+    if not is_default_admin:
+        secret = get_user_secret(data.user_id)
+        if not secret:
+            raise HTTPException(status_code=400, detail="User not found")
 
-    if not totp.verify(data.password, valid_window=1):
-        raise HTTPException(status_code=401, detail="Invalid OTP")
+        totp = pyotp.TOTP(secret)
+
+        if not totp.verify(data.password, valid_window=1):
+            raise HTTPException(status_code=401, detail="Invalid OTP")
 
     # Create JWT token
     payload = {

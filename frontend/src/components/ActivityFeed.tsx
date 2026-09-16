@@ -1,6 +1,8 @@
-import { memo, useMemo } from 'react';
-import type { SearchRecord } from '../hooks/types';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { getStatus, type SearchRecord } from '../hooks/types';
+import { formatLoanType } from '../hooks/formatLoanType';
 import {
+  AlertCircle,
   CheckCircle2,
   XCircle,
   Clock,
@@ -16,12 +18,10 @@ interface ActivityItem {
   loanType: string;
   amount: string;
   timestamp: Date;
-  timeAgo: string;
 }
 
-function getTimeAgo(date: Date): string {
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+function getTimeAgo(date: Date, now: number): string {
+  const diffMs = now - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   const diffHr = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHr / 24);
@@ -75,36 +75,35 @@ const TYPE_CONFIG = {
 interface Props {
   applications: SearchRecord[];
   loading: boolean;
+  /** Set when the applications fetch failed, so an empty feed isn't shown as "no activity". */
+  error?: string | null;
   onSelect?: (record: SearchRecord) => void;
 }
 
-export const ActivityFeed = memo(function ActivityFeed({ applications, loading, onSelect }: Props) {
+export const ActivityFeed = memo(function ActivityFeed({ applications, loading, error, onSelect }: Props) {
+  // Relative times ("5m ago") must keep advancing even when polling returns
+  // unchanged data and nothing else re-renders this memoized component.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   const activities: ActivityItem[] = useMemo(() => {
     return applications
-      .filter((r) => r.timestamp)
+      .filter((r) => r.timestamp && !Number.isNaN(new Date(r.timestamp).getTime()))
       .map((r) => {
-        const approved = r.metadata?.prediction?.approved;
-        let type: ActivityItem['type'] = 'submitted';
-        if (approved === true) type = 'approved';
-        else if (approved === false) type = 'rejected';
-        else type = 'pending';
-
-        const ts = new Date(r.timestamp!);
-        const loanType = String(r.data?.loan_type ?? 'Loan')
-          .replace(/_/g, ' ')
-          .replace(/\b\w/g, (c) => c.toUpperCase());
         const amount = r.data?.loan_amount_requested
           ? `₹${Number(r.data.loan_amount_requested).toLocaleString('en-IN')}`
           : '';
 
         return {
           id: r.id ?? '',
-          type,
+          type: getStatus(r.metadata?.prediction?.approved),
           name: String(r.data?.name ?? 'Anonymous'),
-          loanType,
+          loanType: formatLoanType(r.data?.loan_type, 'Loan'),
           amount,
-          timestamp: ts,
-          timeAgo: getTimeAgo(ts),
+          timestamp: new Date(r.timestamp!),
         };
       })
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
@@ -134,11 +133,11 @@ export const ActivityFeed = memo(function ActivityFeed({ applications, loading, 
   if (!activities.length) {
     return (
       <div className="bg-card rounded-3xl border border-border p-8 shadow-luxury text-center">
-        <div className="w-12 h-12 rounded-2xl bg-gold/10 flex items-center justify-center text-gold mx-auto mb-3">
-          <Clock size={24} />
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${error ? 'bg-red-500/10 text-red-500' : 'bg-gold/10 text-gold'}`}>
+          {error ? <AlertCircle size={24} /> : <Clock size={24} />}
         </div>
-        <p className="font-bold text-ink text-sm">No recent activity</p>
-        <p className="text-xs text-ink-mute mt-1">Activity will appear as applications are processed.</p>
+        <p className="font-bold text-ink text-sm">{error ? "Couldn't load recent activity" : 'No recent activity'}</p>
+        <p className="text-xs text-ink-mute mt-1">{error ?? 'Activity will appear as applications are processed.'}</p>
       </div>
     );
   }
@@ -199,7 +198,7 @@ export const ActivityFeed = memo(function ActivityFeed({ applications, loading, 
 
               {/* Timestamp + arrow */}
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-[10px] text-ink-mute font-medium">{activity.timeAgo}</span>
+                <span className="text-[10px] text-ink-mute font-medium">{getTimeAgo(activity.timestamp, now)}</span>
                 <ArrowRight size={14} className="text-ink-mute opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
               </div>
             </button>

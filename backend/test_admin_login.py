@@ -110,13 +110,26 @@ class TestAdminLogin:
         never be accepted as a valid code again.
         """
         secret = pyotp.random_base32()
-        with patch("admin_security.get_user_secret", return_value=secret):
+        with patch("admin_security.get_user_secret", return_value=secret), \
+                patch("admin_security._DEFAULT_ADMIN_ENABLED", False):
             res = client.post(
                 "/login",
                 json={"user_id": "admin", "password": "admin123"},
                 headers=ORIGIN_HEADERS,
             )
         assert res.status_code == 401
+
+    def test_default_admin_login_when_enabled(self):
+        """ALLOW_DEFAULT_ADMIN (development only) accepts admin/admin123 without Firestore."""
+        with patch("admin_security._DEFAULT_ADMIN_ENABLED", True):
+            res = client.post(
+                "/login",
+                json={"user_id": "admin", "password": "admin123"},
+                headers=ORIGIN_HEADERS,
+            )
+        assert res.status_code == 200
+        payload = jose_jwt.decode(res.json()["access_token"], JWT_SECRET, algorithms=[ALGORITHM])
+        assert payload["sub"] == "admin"
 
 
 # ── /admin/* auth dependency ───────────────────────────────────────────────────

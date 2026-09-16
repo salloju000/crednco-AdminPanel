@@ -59,8 +59,13 @@ export function exportToCSV(records: SearchRecord[], filename: string = 'crednco
   });
 
   // Build CSV string
-  const escape = (val: any) => {
-    const str = String(val ?? '');
+  const escape = (val: unknown) => {
+    let str = String(val ?? '');
+    // Applicant-supplied text lands in a spreadsheet, so neutralise values a
+    // spreadsheet would execute as a formula (=, +, -, @, tab, CR).
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
     // Wrap in quotes if contains comma, quote, or newline
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
       return `"${str.replace(/"/g, '""')}"`;

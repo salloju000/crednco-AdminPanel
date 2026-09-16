@@ -40,27 +40,29 @@ export default {
         },
         gold: {
           DEFAULT: "hsl(var(--gold))",
-          dim: "hsla(var(--gold), 0.7)",
-          light: "hsla(var(--gold), 0.15)",
-          border: "hsla(var(--gold), 0.35)",
-          focus: "hsla(var(--gold), 0.5)",
+          // The --* tokens are space-separated HSL triplets, so alpha must use
+          // the `hsl(h s l / a)` form — `hsla(h s l, a)` is invalid CSS.
+          dim: "hsl(var(--gold) / 0.7)",
+          light: "hsl(var(--gold) / 0.15)",
+          border: "hsl(var(--gold) / 0.35)",
+          focus: "hsl(var(--gold) / 0.5)",
         },
         ink: {
           DEFAULT: "hsl(var(--ink))",
-          mid: "hsla(var(--ink), 0.6)",
-          mute: "hsla(var(--ink), 0.38)",
+          mid: "hsl(var(--ink) / 0.6)",
+          mute: "hsl(var(--ink) / 0.38)",
         },
         parchment: "hsl(var(--parchment))",
         cream: "hsl(var(--cream))",
         success: {
           DEFAULT: "hsl(var(--success))",
-          bg: "hsla(var(--success), 0.07)",
-          border: "hsla(var(--success), 0.22)",
+          bg: "hsl(var(--success) / 0.07)",
+          border: "hsl(var(--success) / 0.22)",
         },
         warning: {
           DEFAULT: "hsl(var(--warning))",
-          bg: "hsla(var(--warning), 0.07)",
-          border: "hsla(var(--warning), 0.22)",
+          bg: "hsl(var(--warning) / 0.07)",
+          border: "hsl(var(--warning) / 0.22)",
         },
         safe: "hsl(var(--success))", // Alias for success
         sidebar: {

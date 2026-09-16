@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAdminAuth } from '../hooks/useAdminAuth.ts';
 import { useTheme } from '../hooks/useTheme.ts';
 import { useAccountsDirectory } from '../hooks/useAccountsDirectory.ts';
@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -20,7 +21,8 @@ import { useSearches } from '../hooks/useSearches.ts';
 import { useApplications } from '../hooks/useApplications.ts';
 import { useUserStats } from '../hooks/useUserStats.ts';
 import { exportToCSV } from '../hooks/exportCSV.ts';
-import type { SearchRecord } from '../hooks/types.ts';
+import { getStatus, type SearchRecord } from '../hooks/types.ts';
+import { POLL_INTERVAL_MS } from '../hooks/useAdminResource.ts';
 import { Sidebar } from '../components/Sidebar.tsx';
 import { ApplicationsTable } from '../components/ApplicationsTable.tsx';
 import { ApplicationModal } from '../components/ApplicationModal.tsx';
@@ -50,6 +52,7 @@ export default function App() {
   const {
     searches,
     loading: searchLoading,
+    refreshing: searchRefreshing,
     error: searchError,
     toasts: searchToasts,
     fetchSearches,
@@ -59,12 +62,14 @@ export default function App() {
   const {
     applications,
     loading,
+    refreshing,
     error,
     actionLoading,
     lastRefreshed,
     toasts: applicationToasts,
     fetchApplications,
     handleAction: handleApplicationAction,
+    handleBulkAction: handleApplicationBulkAction,
   } = useApplications(authToken, handleLogOut);
 
   const {
@@ -89,9 +94,18 @@ export default function App() {
     }
   }, [activeTab, fetchUserStats]);
 
-  const approvedCount = applications.filter((s) => s.metadata?.prediction?.approved === true).length;
-  const rejectedCount = applications.filter((s) => s.metadata?.prediction?.approved === false).length;
+  const approvedCount = applications.filter((s) => getStatus(s.metadata?.prediction?.approved) === 'approved').length;
+  const rejectedCount = applications.filter((s) => getStatus(s.metadata?.prediction?.approved) === 'rejected').length;
   const pendingCount = applications.length - approvedCount - rejectedCount;
+
+  // Dashboard sync health: a failed fetch must not read as "0 applications, all good".
+  const dashboardError = error ?? searchError;
+  const applicationsUnavailable = !!error && applications.length === 0;
+  const syncStatus = dashboardError
+    ? { label: 'Degraded', dot: 'bg-red-500' }
+    : loading || searchLoading
+      ? { label: 'Connecting…', dot: 'bg-amber-500' }
+      : { label: 'Operational', dot: 'bg-green-500' };
 
   // Track "new since last visit" using localStorage
   const newSinceLastVisit = useMemo(() => {
@@ -115,12 +129,32 @@ export default function App() {
     });
   };
 
-  // Bulk action handler for ApplicationsTable
-  const onBulkAction = useCallback((ids: string[], action: 'approve' | 'reject') => {
-    ids.forEach((id) => {
-      handleApplicationAction(id, action, () => {});
-    });
-  }, [handleApplicationAction]);
+  // Rows the table currently shows (after its search/filter/sort), so "Export CSV"
+  // exports what the admin is looking at rather than the whole unfiltered list.
+  const [visibleRows, setVisibleRows] = useState<SearchRecord[] | null>(null);
+
+  const changeTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setVisibleRows(null);
+  };
+  const changeAnalyticsSubTab = (subTab: typeof analyticsSubTab) => {
+    setAnalyticsSubTab(subTab);
+    setVisibleRows(null);
+  };
+
+  const handleSync = () => {
+    if (activeTab === 'analytics') {
+      fetchSearches();
+    } else if (activeTab === 'applications') {
+      fetchApplications();
+    } else if (activeTab === 'accounts') {
+      fetchUserStats();
+    } else {
+      // Dashboard only renders applications + searches.
+      fetchApplications();
+      fetchSearches();
+    }
+  };
 
   if (!authToken) {
     return <LoginScreen onLoginSuccess={setAuthToken} />;
@@ -130,7 +164,7 @@ export default function App() {
     <div className="min-h-screen bg-background flex flex-col md:flex-row font-sans text-foreground transition-colors duration-300">
       <Sidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={changeTab}
         lastRefreshed={lastRefreshed}
         onLogOut={handleLogOut}
         pendingCount={pendingCount}
@@ -167,11 +201,11 @@ export default function App() {
                <Button
                  variant="default"
                  onClick={() => {
-                   const data = activeTab === 'analytics' ? searches : applications;
+                   const all = activeTab === 'analytics' ? searches : applications;
                    const name = activeTab === 'analytics' ? 'crednco_searches' : 'crednco_applications';
-                   exportToCSV(data, name);
+                   exportToCSV(visibleRows ?? all, name);
                  }}
-                 disabled={(activeTab === 'analytics' ? searches : applications).length === 0}
+                 disabled={(visibleRows ?? (activeTab === 'analytics' ? searches : applications)).length === 0}
                  className="h-12 px-5 rounded-2xl shadow-luxury group"
                >
                  <Download size={16} className="mr-2" />
@@ -179,25 +213,13 @@ export default function App() {
                </Button>
              )}
              
-             <Button 
-               variant="default" 
-               onClick={() => {
-                 if (activeTab === 'analytics') {
-                   fetchSearches();
-                 } else if (activeTab === 'applications') {
-                   fetchApplications();
-                 } else if (activeTab === 'accounts') {
-                   fetchUserStats();
-                 } else {
-                   fetchApplications();
-                   fetchSearches();
-                   fetchUserStats();
-                 }
-               }}
-               disabled={loading || searchLoading || userStatsLoading}
+             <Button
+               variant="default"
+               onClick={handleSync}
+               disabled={refreshing || searchRefreshing || userStatsLoading}
                className="h-12 px-6 rounded-2xl shadow-luxury group"
              >
-               <RefreshCw size={16} className={cn("mr-2", (loading || searchLoading) && "animate-spin")} />
+               <RefreshCw size={16} className={cn("mr-2", (refreshing || searchRefreshing) && "animate-spin")} />
                Sync Data
              </Button>
            </div>
@@ -217,35 +239,53 @@ export default function App() {
                   key={label}
                   className="bg-card p-6 rounded-3xl border border-border shadow-luxury relative overflow-hidden group hover:border-gold/50 transition-all"
                 >
-                  <div className={cn("absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity", color)}>
+                  {/* Decorative; hidden on phones where it overlaps the label */}
+                  <div className={cn("absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity hidden sm:block", color)}>
                     <Icon size={48} />
                   </div>
                   <p className="text-[10px] font-black tracking-[0.15em] uppercase text-ink-mute mb-2">
                     {label}
                   </p>
                   <p className={cn("text-4xl font-black tracking-tight", color)}>
-                    {loading ? '—' : value.toLocaleString()}
+                    {loading || applicationsUnavailable ? '—' : value.toLocaleString()}
                   </p>
                 </div>
               ))}
             </div>
 
             <div className="grid grid-cols-1 gap-4 mb-8">
-              <div className="bg-muted/30 rounded-3xl border border-border/40 p-6 flex flex-row items-center justify-between gap-6">
-                <div className="space-y-1">
+              <div
+                className={cn(
+                  "bg-muted/30 rounded-3xl border border-border/40 p-6 flex flex-row items-center justify-between gap-6",
+                  dashboardError && "border-red-500/30 bg-red-500/5"
+                )}
+              >
+                <div className="space-y-1 min-w-0">
                   <h4 className="text-lg font-bold text-ink flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                    System Status: Operational
+                    <span className={cn("w-2.5 h-2.5 rounded-full animate-pulse shrink-0", syncStatus.dot)} />
+                    System Status: {syncStatus.label}
                   </h4>
+                  {dashboardError && (
+                    <p className="text-xs font-semibold text-red-500 flex items-center gap-1.5" role="alert">
+                      <AlertTriangle size={12} className="shrink-0" />
+                      {dashboardError}
+                    </p>
+                  )}
                   <p className="text-xs text-ink-mute">
-                    Last synchronized {lastRefreshed ? lastRefreshed.toLocaleTimeString() : 'waiting for sync...'}.
+                    {lastRefreshed ? `Last synchronized ${lastRefreshed.toLocaleTimeString()}.` : 'Waiting for first sync…'}
                   </p>
+                  {dashboardError && (
+                    <Button variant="default" onClick={handleSync} disabled={refreshing || searchRefreshing} className="mt-2">
+                      <RefreshCw size={12} className={cn((refreshing || searchRefreshing) && "animate-spin")} />
+                      Retry
+                    </Button>
+                  )}
                 </div>
-                <div className="flex items-center gap-4 p-3 bg-card rounded-2xl border border-border shadow-sm">
+                <div className="flex items-center gap-4 p-3 bg-card rounded-2xl border border-border shadow-sm shrink-0">
                   <TrendingUp size={18} className="text-green-500" />
                   <div className="flex flex-col">
                     <span className="text-[9px] font-bold uppercase tracking-wider text-ink-mute">Sync Pace</span>
-                    <span className="text-sm font-black text-ink">30s</span>
+                    <span className="text-sm font-black text-ink">{POLL_INTERVAL_MS / 1000}s</span>
                   </div>
                 </div>
               </div>
@@ -257,6 +297,7 @@ export default function App() {
                 applications={applications}
                 searches={searches}
                 loading={loading || searchLoading}
+                error={error}
               />
             </div>
 
@@ -265,6 +306,7 @@ export default function App() {
               <ActivityFeed
                 applications={applications}
                 loading={loading}
+                error={error}
                 onSelect={setSelected}
               />
             </div>
@@ -402,7 +444,8 @@ export default function App() {
               actionLoading={actionLoading}
               onRetry={fetchApplications}
               onSelect={setSelected}
-              onBulkAction={onBulkAction}
+              onBulkAction={handleApplicationBulkAction}
+              onVisibleRowsChange={setVisibleRows}
             />
           </div>
         ) : (
@@ -430,7 +473,7 @@ export default function App() {
                   ].map((subTab) => (
                     <button
                       key={subTab.id}
-                      onClick={() => setAnalyticsSubTab(subTab.id as any)}
+                      onClick={() => changeAnalyticsSubTab(subTab.id as typeof analyticsSubTab)}
                       className={cn(
                         "px-5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap",
                         analyticsSubTab === subTab.id
@@ -485,6 +528,7 @@ export default function App() {
                   actionLoading={actionLoading}
                   onRetry={fetchSearches}
                   onSelect={setSelected}
+                  onVisibleRowsChange={setVisibleRows}
                 />
               </div>
             )}
@@ -506,12 +550,8 @@ export default function App() {
           email={selectedEmail}
           applications={applications}
           onClose={() => setSelectedEmail(null)}
-          onNavigateToApplications={() => {
-            setActiveTab('applications');
-          }}
-          onNavigateToAnalytics={() => {
-            setActiveTab('analytics');
-          }}
+          onNavigateToApplications={() => changeTab('applications')}
+          onNavigateToAnalytics={() => changeTab('analytics')}
           onSelectApplication={(record) => {
             setSelectedEmail(null);
             setSelected(record);

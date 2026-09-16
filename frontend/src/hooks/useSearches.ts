@@ -4,6 +4,7 @@ export function useSearches(authToken: string | null, onUnauthorized?: () => voi
   const {
     items: searches,
     loading,
+    refreshing,
     error,
     actionLoading,
     lastRefreshed,
@@ -18,6 +19,7 @@ export function useSearches(authToken: string | null, onUnauthorized?: () => voi
   return {
     searches,
     loading,
+    refreshing,
     error,
     actionLoading,
     lastRefreshed,

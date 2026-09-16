@@ -23,6 +23,7 @@ import type { SearchRecord } from '../hooks/types';
 import { Button } from './Button';
 import { StatusBadge } from '../hooks/statusbadge';
 import { CopyButton } from '../hooks/copybutton';
+import { formatLoanType } from '../hooks/formatLoanType';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -175,7 +176,7 @@ export function ApplicationModal({ search, onClose, onAction, actionLoading }: P
           <Section title="Requested Terms" icon={<FileText size={14} />}>
             <Detail 
               label="Loan Product" 
-              value={(data.loan_type as string)?.replace(/([A-Z])/g, ' $1').trim().replace(/\b\w/g, c => c.toUpperCase())} 
+              value={data.loan_type ? formatLoanType(data.loan_type) : null}
               icon={<ChevronRight size={14} />} 
             />
             <Detail label="Principal Amount" value={amount} icon={<IndianRupee size={14} />} />

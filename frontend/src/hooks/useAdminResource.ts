@@ -15,6 +15,9 @@ export interface Toast {
 
 let toastSeq = 0;
 
+/** How often the admin list endpoints are re-polled. */
+export const POLL_INTERVAL_MS = 30_000;
+
 function applyOptimisticUpdate(
   prev: SearchRecord[],
   id: string,
@@ -55,7 +58,11 @@ export function useAdminResource(
   { resourcePath, logPrefix }: UseAdminResourceOptions
 ) {
   const [items, setItems]                 = useState<SearchRecord[]>([]);
+  // `loading` is only the first load for the current token (drives skeletons);
+  // `refreshing` covers every in-flight fetch, including the 30s polls, so
+  // background refreshes don't blank out already-rendered data.
   const [loading, setLoading]             = useState(true);
+  const [refreshing, setRefreshing]       = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -101,7 +108,7 @@ export function useAdminResource(
     console.debug(`${logPrefix} fetching ${resourcePath}`, { url });
 
     try {
-      setLoading(true);
+      setRefreshing(true);
       const res = await fetch(url, {
         headers,
         signal: ctrl.signal,
@@ -151,14 +158,19 @@ export function useAdminResource(
       setError(getErrorMessage(err));
       return [];
     } finally {
-      setLoading(false);
+      // A superseded (aborted) request must not end the state of the one that replaced it.
+      if (abortRef.current === ctrl) {
+        setRefreshing(false);
+        setLoading(false);
+      }
     }
   }, [authToken, adminHeaders, resourcePath, logPrefix, setItemsIfChanged]);
 
   useEffect(() => {
     if (!authToken) return;
+    setLoading(true);
     fetchItems();
-    const id = setInterval(fetchItems, 30_000);
+    const id = setInterval(fetchItems, POLL_INTERVAL_MS);
     return () => {
       clearInterval(id);
       abortRef.current?.abort();
@@ -210,13 +222,65 @@ export function useAdminResource(
     [fetchItems, pushToast, authToken, adminHeaders, resourcePath, logPrefix]
   );
 
+  /**
+   * Approve/reject many records in one go.
+   *
+   * Runs the POSTs sequentially and refetches once at the end: firing them in
+   * parallel (one fetchItems + one toast per record) meant each refetch aborted
+   * the previous one, flooded the toast stack, and could trip the backend's
+   * 20-requests/minute action limit on a large selection.
+   */
+  const handleBulkAction = useCallback(
+    async (ids: string[], action: 'approve' | 'reject') => {
+      if (!authToken || ids.length === 0) return;
+
+      const approved = action === 'approve';
+      const verb = approved ? 'approved' : 'rejected';
+      setItems((prev) => ids.reduce((acc, id) => applyOptimisticUpdate(acc, id, approved), prev));
+      setActionLoading(true);
+
+      const failures: string[] = [];
+      try {
+        for (const id of ids) {
+          const url = `${import.meta.env.VITE_API_URL}/admin/${resourcePath}/${id}/${action}`;
+          try {
+            const res = await fetch(url, { method: 'POST', headers: adminHeaders() });
+            if (!res.ok) {
+              if (res.status === 401 && onUnauthorized) onUnauthorized();
+              throw new Error(`HTTP ${res.status}`);
+            }
+          } catch (err: unknown) {
+            console.error(`${logPrefix} bulk action failed for ${id}`, err);
+            failures.push(getErrorMessage(err));
+          }
+        }
+
+        await fetchItems();
+
+        const done = ids.length - failures.length;
+        if (!failures.length) {
+          pushToast(`${done} ${done === 1 ? 'application' : 'applications'} ${verb}.`, 'success');
+        } else if (done) {
+          pushToast(`${done} ${verb}, ${failures.length} failed (${failures[0]}).`, 'error');
+        } else {
+          pushToast(`Bulk ${action} failed: ${failures[0]}`, 'error');
+        }
+      } finally {
+        setActionLoading(false);
+      }
+    },
+    [authToken, adminHeaders, resourcePath, logPrefix, fetchItems, pushToast, onUnauthorized]
+  );
+
   return {
     items,
     loading,
+    refreshing,
     error,
     actionLoading,
     lastRefreshed,
     toasts,
+    handleBulkAction,
     fetchItems,
     handleAction,
   };

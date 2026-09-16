@@ -10,11 +10,32 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException, status
+from google.api_core.exceptions import ResourceExhausted
 from google.cloud.firestore_v1.query import Query
 
 from firestore_client import get_db, normalize_record
 
 logger = logging.getLogger(__name__)
+
+
+def _unavailable(what: str, exc: Exception) -> HTTPException:
+    """
+    Turn a Firestore read failure into a 503.
+
+    These fetches used to swallow every exception and return an empty list,
+    which reaches the dashboard as HTTP 200 + `[]` — indistinguishable from
+    "there are genuinely no records". A Firestore outage or an exhausted
+    read quota then looks like an empty database instead of a failure.
+    """
+    if isinstance(exc, ResourceExhausted):
+        detail = (
+            f"Firestore read quota exceeded while fetching {what}. "
+            "Check the project's Firestore usage limits and billing plan."
+        )
+    else:
+        detail = f"Failed to fetch {what} from Firestore."
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
 
 def update_search_status(doc_id: str, approved: bool) -> bool:
@@ -59,7 +80,10 @@ def fetch_recent_searches(limit: int | None = None) -> list[dict[str, Any]]:
     db = get_db()
     if db is None:
         logger.warning("Firestore not available; cannot fetch searches.")
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Firestore is unavailable. Check Firebase configuration and credentials.",
+        )
 
     try:
         query = db.collection("searches").order_by("timestamp", direction=Query.DESCENDING)
@@ -82,7 +106,7 @@ def fetch_recent_searches(limit: int | None = None) -> list[dict[str, Any]]:
         return results
     except Exception as exc:
         logger.error("Failed to fetch searches from Firestore: %s", exc, exc_info=True)
-        return []
+        raise _unavailable("searches", exc) from exc
 
 
 def fetch_recent_applications(limit: int | None = None) -> list[dict[str, Any]]:
@@ -95,7 +119,10 @@ def fetch_recent_applications(limit: int | None = None) -> list[dict[str, Any]]:
     db = get_db()
     if db is None:
         logger.warning("Firestore not available; cannot fetch applications.")
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Firestore is unavailable. Check Firebase configuration and credentials.",
+        )
 
     try:
         query = db.collection("applications").order_by("timestamp", direction=Query.DESCENDING)
@@ -118,4 +145,4 @@ def fetch_recent_applications(limit: int | None = None) -> list[dict[str, Any]]:
         return results
     except Exception as exc:
         logger.error("Failed to fetch applications from Firestore: %s", exc, exc_info=True)
-        return []
+        raise _unavailable("applications", exc) from exc
